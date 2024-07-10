@@ -1,0 +1,42 @@
+---
+- name: List and write Spring Boot JAR files containing 'spring' in their names
+  hosts: all
+  gather_facts: false
+  vars_files:
+    - ../config/backup_paths.yml
+
+  tasks:
+    - name: Find JAR files matching patterns in paths
+      shell: >
+        find / -type f -name "*spring*.jar" -path "*{{ item }}" 2>/dev/null || true
+      register: jar_files
+      with_items: "{{ applications | map(attribute='patterns') | flatten }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Consolidate JAR file results
+      set_fact:
+        all_jar_files: "{{ all_jar_files | default([]) + jar_files.results | map(attribute='stdout_lines') | flatten }}"
+
+    - name: Filter out JAR files in main paths
+      set_fact:
+        filtered_jar_files: "{{ all_jar_files | reject('search', main_paths | join('|')) | list }}"
+      vars:
+        main_paths: "{{ applications | map(attribute='main_paths') | flatten }}"
+
+    - name: Ensure output directory exists on server
+      file:
+        path: "/tmp/ansible-output"
+        state: directory
+
+    - name: Ensure application output directories exist on server
+      file:
+        path: "/tmp/ansible-output/{{ item.name }}"
+        state: directory
+      with_items: "{{ applications }}"
+
+    - name: Write filtered JAR file paths to a file on server
+      copy:
+        content: "{{ filtered_jar_files | join('\n') }}"
+        dest: "/tmp/ansible-output/{{ item.name }}/filtered_jar_files.txt"
+      with_items: "{{ applications }}"
